@@ -1,0 +1,40 @@
+
+* Sébastien: quick summary on the star subtraction
+- stars substraced, based on position in catalog, astroid not removed
+- stars position to be provided if possible/light task to feed segmentation network or too complex/out scope ?
+- use cleaned and not-cleaned images -> AI Sebastien
+- flux and magnitude provided in SSDS catalogue -> used to compute M/L 
+- try to avoid using too much metada not available for later images, keep it simple, extract from images
+
+* Wouter: plans to refine the data preprocessing (and beyond)
+
+* Stephan/Rares/Serge: first training exercises
+. should add histogram to 3K cnn features
+. from metadata using : width of image, size of pixel, assumption that M/L is instrisic property of galaxy ?
+. should we select based on distance -> distance cut-off at 400
+
+* Metric :
+if ChiSq, need to use error (absolute or relative) or M/L error
+what metric used in Zibetti
+check to use log for M/L ratio or not ?
+-> use weight to input error
+
+* All: discuss and write down the main goals and methodology, including what exactly to predict, define main dataset, comparison with Zibetti-formalism,...
+
+* All: discuss the immediate short term work to be done, including metric to evaluate, alternatives for data cleaning,...
+
+* AOB
+
+* Objective of the paper : 
+- predict mass of galaxies based on 1 band picture and distance, use morphology to cope with missing data :
+a) which precision with single band
+b) 2nd model with g and i and uses flux to do Zibetti-like (recalibrated) -> AI Wouter
+
+- true label comes images with different colors (Maxis? fitting)
+- can't apply Zibetti directly
+
+
+
+nb: petrosian magnitude -> http://www.sdss.org/dr12/algorithms/magnitudes/
+
+Next meeting Nov 6th 9pm
