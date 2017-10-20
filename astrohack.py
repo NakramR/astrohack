@@ -24,9 +24,10 @@ def read_image(idd):
     X = np.float32(X)
     return X
 
-def drawOneGalaxy(galaxyID):
+def drawOneGalaxy(galaxyID, preProc=0):
     oneImageData = read_image(galaxyID)
-    print(galaxyID)
+    if ( preProc != 0):
+        oneImageData = img_preprocnoread(oneImageData,preProc)
 
     # new image
     fig = plt.figure(figsize=(15,15))
@@ -368,3 +369,134 @@ def getLGBMModelsNoCV(trainSet, YSet, errSet, errlinSet):
     return models, cvtrainpreds
 
 
+postImgFeatureNames = ['norm.flux.sum', 'norm.flux.min',
+                       'norm.flux.max', 'norm.flux.mean', 
+                       'norm.flux.std', 'center.flux', 
+                       'aroundCenter.flux']
+preImgFeatureNames = ['pre.flux.sum', 'pre.flux.min', 
+                      'pre.flux.max', 'pre.flux.mean',
+                      'pre.flux.std', 'pre.center.flux',
+                      'pre.aroundCenter.flux', 'width']
+distanceNames = ['D', '1/D', 'D**2', '1/D**2', 'D**3', '1/D**3', 'log(D)', '1/log(D)', 'log(D**2)', 'log(1/D**2)', 'log(D)**2', '1/log(D)**2' ]
+numFeatures = 0
+
+def getFeatures(preProcessingNum):
+    global vgg16, r50, cnn,numFeatures
+    
+    if vgg16 == None:
+        vgg16 = VGG16(weights='imagenet',include_top=True,input_shape=(224,224,3))
+    if r50 == None:
+        r50 = ResNet50(weights='imagenet',include_top=False,input_shape=(224,224,3))
+#     if cnn == None:
+#         cnn = load_model('encoder.h5')
+    Xg3r50 = []
+    Xg3vgg16 = []
+    postImgFeatures = []
+    csize=2
+    preImgFeatures = []
+    cnnFeatures = []
+
+    maxChunkNumber = math.ceil(len(ids)/chunkSize)
+    chunkStart = 0
+    # for chunkStart in tqdm(range(0, 3)):
+    
+    # do the loading by chunk to avoid consuming too much memory
+    for chunkStart in tqdm(range(0, len(ids), chunkSize)):
+        curChunk = int((chunkStart//chunkSize))
+        valuesInThisChunk = min(chunkStart+chunkSize,len(ids))-chunkStart
+
+        Xg_ = []
+        pre_ex_ = []
+
+        # preprocess the image and collect some raw image stats
+        for i in range(chunkStart, chunkStart+valuesInThisChunk):
+            X = read_image(ids[i])
+            Xg_.append(img_preprocnoread(X, preProcessingNum))
+            pre_ex_.append([
+                X.sum(),
+                X.min(),
+                X.max(),
+                X.mean(),
+                X.std(),
+                X[X.shape[0]//2,X.shape[1]//2],
+                np.mean(X[X.shape[0]//2-csize:X.shape[0]//2+csize,X.shape[1]//2-csize:X.shape[1]//2+csize]), # mean center
+                X.shape[0], 
+            ])
+
+        # stack the postprocessing
+        pre_ex = np.stack(pre_ex_)
+        Xg = np.stack(Xg_)
+
+        # collect some post processing stats
+        post_ex = np.hstack([
+            np.sum(Xg.reshape(valuesInThisChunk,-1),axis=1).reshape(valuesInThisChunk,1),
+            np.min(Xg.reshape(valuesInThisChunk,-1),axis=1).reshape(valuesInThisChunk,1),
+            np.max(Xg.reshape(valuesInThisChunk,-1),axis=1).reshape(valuesInThisChunk,1),
+            np.mean(Xg.reshape(valuesInThisChunk,-1),axis=1).reshape(valuesInThisChunk,1),
+            np.std(Xg.reshape(valuesInThisChunk,-1),axis=1).reshape(valuesInThisChunk,1),
+            Xg[:,112,112].reshape(valuesInThisChunk,1),       # center
+            np.mean(Xg[:,112-csize:112+csize,112-csize:112+csize].reshape(valuesInThisChunk,-1),axis=1).reshape(valuesInThisChunk,-1) # mean center
+            ])
+
+        
+#         cnnFeatures_ = cnn.predict( Xg[:,:,:,newaxis])
+#         cnnFeatures_ = cnnFeatures.reshape(valuesInThisChunk, -1)
+        
+        # prepare correct dimension to feed to imagenet networks
+        Xg3 = np.zeros((valuesInThisChunk,224,224,3))
+        Xg3[:,:,:,:] = Xg.reshape(valuesInThisChunk,224,224,1)
+
+        # do r50 prediction
+        Xg3r50_ = r50.predict(Xg3).reshape(valuesInThisChunk, 2048)
+        Xg3vgg16_ = vgg16.predict(Xg3)
+        
+
+
+        if chunkStart == 0:
+            Xg3r50 = Xg3r50_
+            Xg3vgg16 = Xg3vgg16_
+            preImgFeatures = pre_ex
+            postImgFeatures = post_ex
+#             cnnFeatures = cnnFeatures_
+        else:
+            Xg3r50 = np.concatenate([Xg3r50,Xg3r50_], axis=0)
+            Xg3vgg16 = np.concatenate([Xg3vgg16,Xg3vgg16_], axis=0)
+            preImgFeatures = np.concatenate([preImgFeatures,pre_ex], axis=0)
+            postImgFeatures = np.concatenate([postImgFeatures,post_ex], axis=0)
+#             cnnFeatures = np.concatenate([cnnFeatures, cnnFeatures_], axis = 0)
+
+
+    # add features from the data itself (distance)
+    Distance = df.Distance.values[:N].reshape(N,1)
+
+    Xg3f = np.hstack ( ( 
+            Xg3r50, 
+            Xg3vgg16, 
+#             cnnFeatures,
+            Distance,
+            1/Distance,
+            Distance**2,
+            1/(Distance**2),
+            Distance**3,
+            1/(Distance**3),
+            np.log(Distance),
+            1/np.log(Distance),
+            np.log(Distance**2),
+            1/np.log(Distance**2),
+            np.log(Distance)**2,
+            1/np.log(Distance)**2,
+            preImgFeatures,
+            postImgFeatures
+            ) )
+
+
+    Xg3fNames = ( [prefixThisRound+'.r50.' + str(i) for i in range(Xg3r50.shape[1])]
+                + [prefixThisRound+'.vgg16.' + str(i) for i in range(Xg3vgg16.shape[1])] 
+#                 + [prefixThisRound+'.cnn.' + str(i) for i in range(cnnFeatures.shape[1])] 
+                + [prefixThisRound+'.'+ n for n in distanceNames]
+                + [prefixThisRound+'.'+ n for n in preImgFeatureNames]
+                + [prefixThisRound+'.'+ n for n in postImgFeatureNames])
+    return Xg3f, Xg3fNames
+
+# numFeatures = 2048 + 1000 + 7*7 *8 + len(postImgFeatureNames) + len(preImgFeatureNames) + len(distanceNames) 
+numFeatures = 2048 + 1000 + len(postImgFeatureNames) + len(preImgFeatureNames) + len(distanceNames) 
