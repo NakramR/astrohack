@@ -22,7 +22,7 @@ def fc_identity(input_tensor, n=3000, d=0.5):
 def model9d(feature_size,opt=nadam()):
     n = int(4 * 1024)
 
-    in2 = Input((fsize,), name='x2')
+    in2 = Input((feature_size,), name='x2')
     x2 = fc_block1(in2, n, d=0.5)
     x2 = fc_identity(x2, n, d=0.5)
     x2 = fc_identity(x2, n, d=0.5)
