@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib import gridspec
 import matplotlib.collections
 import seaborn as sns
+import keras
 
 dataFolder = ''
 
@@ -240,14 +241,15 @@ def img_preprocnoread(Xg, preProcNum = 0):
         Xg = np.flip(Xg,1)
     if preProcNum & 4: # rotate
         Xg = np.rot90(Xg)
-    if preProcNum & 8: # scale [0,1]
-        Xg = scale_image(Xg)
     if preProcNum & 16: # log
         Xg = np.log1p(Xg - Xg.min())
-    if preProcNum & 32: # normalize
-        Xg = normalize_image(Xg)
     if preProcNum & 64: # crop
         Xg = crop_image(Xg)
+
+    if preProcNum & 32: # normalize
+        Xg = normalize_image(Xg)
+    if preProcNum & 8: # scale [0,1]
+        Xg = scale_image(Xg)
 
     
     if Xg.shape[0] >= 224:
@@ -500,3 +502,45 @@ def getFeatures(preProcessingNum):
 
 # numFeatures = 2048 + 1000 + 7*7 *8 + len(postImgFeatureNames) + len(preImgFeatureNames) + len(distanceNames) 
 numFeatures = 2048 + 1000 + len(postImgFeatureNames) + len(preImgFeatureNames) + len(distanceNames) 
+
+from IPython.display import clear_output
+
+class PlotLosses(keras.callbacks.Callback):
+    def __init__(self):
+        self.initVars()
+    
+    def initVars(self):
+        self.i = 0
+        self.x = []
+        self.losses = []
+        self.val_losses = [] # self validation
+        self.fig = plt.figure()
+        self.logs = []
+        self.lr = []
+        
+    def on_train_begin(self, logs={}):
+        self.initVars()
+
+    def on_epoch_end(self, epoch, logs={}):
+        
+        self.i += 1
+        
+        curloss = logs.get('loss')
+        self.losses.append(curloss)
+        self.val_losses.append(logs.get('val_loss'))
+        self.logs.append(logs)
+        self.x.append(self.i)
+        
+        clear_output(wait=True)
+        plt.figure(figsize=(6,6))
+        ax = plt.figure(111)
+        self.plotLosses(ax)
+        plt.show()
+
+    def plotLosses(self, ax):
+        plt.plot(self.x, self.losses, label="train loss")
+        plt.plot(self.x, self.val_losses, label="val loss")
+        # ax.set_yscale("log", nonposy='clip')
+        plt.legend()
+        
+plot_losses = PlotLosses()
