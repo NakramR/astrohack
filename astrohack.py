@@ -7,6 +7,10 @@ from matplotlib import gridspec
 import matplotlib.collections
 import seaborn as sns
 import keras
+from sklearn.model_selection import *
+import lightgbm as lgbm
+
+
 
 dataFolder = ''
 
@@ -98,6 +102,7 @@ def removePeakAtPosition(data, x, y, size):
 
     threshold = BlackHighThreshold #definition of "black"
     exlusionRadiusSquared = (imagewidth*PeakExclusionRadius)**2  # radius around the center where we don't remove anything
+    circlesize = 0
     for i in range(imagewidth):
         if (
                 ( x-i >= 0 and data[x-i][y] < threshold) or
@@ -231,73 +236,137 @@ def crop_image(Xg, percentage=0.75):
     
     return Xg
 
-def img_preprocnoread(Xg, preProcNum = 0):
-    if preProcNum & 128: #hackaton preproc
+PP_VFLIP = 1
+PP_HFLIP = 2
+PP_ROTATE = 4
+PP_SCALE = 8
+PP_LOG1P = 16
+PP_NORMALIZE = 32
+PP_CROP = 64
+PP_HACKATON = 128
+PP_LOG = PP_LOG1P
+PP_RESCALE224 = 0
+
+def img_preprocnoread(Xg, preProcNum = 0, resize=True):
+    if preProcNum & PP_HACKATON: #hackaton preproc
         Xg = cleanupImage(Xg)
-
-    if preProcNum & 1: # vflip
+    if preProcNum & PP_VFLIP: # vflip
         Xg = np.flip(Xg,0)
-    if preProcNum & 2: # hflip
+    if preProcNum & PP_HFLIP: # hflip
         Xg = np.flip(Xg,1)
-    if preProcNum & 4: # rotate
+    if preProcNum & PP_ROTATE: # rotate
         Xg = np.rot90(Xg)
-    if preProcNum & 16: # log
-        Xg = np.log1p(Xg - Xg.min())
-    if preProcNum & 64: # crop
+    if preProcNum & PP_CROP: # crop
         Xg = crop_image(Xg)
-
-    if preProcNum & 32: # normalize
-        Xg = normalize_image(Xg)
-    if preProcNum & 8: # scale [0,1]
+    if preProcNum & PP_SCALE: # scale [0,1]
         Xg = scale_image(Xg)
-
+    if preProcNum & PP_LOG1P: # log
+        Xg = np.log1p(Xg - Xg.min())
+    if preProcNum & PP_NORMALIZE: # normalize
+        Xg = normalize_image(Xg)
     
-    if Xg.shape[0] >= 224:
-        Xgr = cv2.resize(Xg,(224,224), cv2.INTER_AREA)
+    if preProcNum == 0 or resize==True:
+        if Xg.shape[0] >= 224:
+            Xg = cv2.resize(Xg,(224,224), cv2.INTER_AREA)
+        else:
+            Xg = cv2.resize(Xg,(224,224), cv2.INTER_CUBIC)
+    return Xg
+   
+def img_preproclist(x, preProcList):
+    
+    if (type(x) == int or type(x) == str or type(x)==np.int64 ):
+        Xg = read_image(x)
     else:
-        Xgr = cv2.resize(Xg,(224,224), cv2.INTER_CUBIC)
+        Xg = x
+
+    for preProcNum in preProcList:
+        Xg = img_preprocnoread(Xg, preProcNum, False)
+    return Xg
     
-    return Xgr
     
 def img_preproc(id, preProcNum = 0):
     Xg = read_image(id)
     return img_preprocnoread(Xg,preProcNum)
 
-def getAstrohackDataFrame():
+def getAstrohackDataFrameOld():
 
-    df =  pd.read_fwf('metaData.dat', comment = '#')
+    if os.path.isfile('metadataF.csv'):
+        df = pd.read_csv('metadataF.csv')
+    else:
+        df =  pd.read_fwf('metaData.dat', comment = '#')
 
-    df['RA'] = df['RA'].apply(np.float64)
-    df['DEC'] = df['DEC'].apply(np.float64)
-    df['D25'] = df['D25'].apply(np.float64)
-    df['redshi'] = df['redshi'].apply(np.float64)
-    df['logMstar'] = df['logMst'].apply(np.float64) #renamed
-    df['err_logMstar'] = df['err_l'].apply(np.float64) #renamed
-    df['GalSize_kpc'] = df['GalSize_kpc'].apply(np.float64)
-    df['Distance'] = df['D_Mpc'].apply(np.float64) #renamed
-    df['d_pix_kpc'] = df['d_pix_kpc'].apply(np.float64)
-    df['ML_g'] = df['ML_g'].apply(np.float64)
+        df['RA'] = df['RA'].apply(np.float64)
+        df['DEC'] = df['DEC'].apply(np.float64)
+        df['D25'] = df['D25'].apply(np.float64)
+        df['redshi'] = df['redshi'].apply(np.float64)
+        df['logMstar'] = df['logMst'].apply(np.float64) #renamed
+        df['err_logMstar'] = df['err_l'].apply(np.float64) #renamed
+        df['GalSize_kpc'] = df['GalSize_kpc'].apply(np.float64)
+        df['Distance'] = df['D_Mpc'].apply(np.float64) #renamed
+        df['d_pix_kpc'] = df['d_pix_kpc'].apply(np.float64)
+        df['ML_g'] = df['ML_g'].apply(np.float64)
 
-    df['lin_mass'] = np.power(10, df.logMstar)
-    df['lin_err'] = df['lin_mass'] * np.log(10) * df.err_logMstar
+        df['lin_mass'] = np.power(10, df.logMstar)
+        df['lin_err'] = df['lin_mass'] * np.log(10) * df.err_logMstar
 
-    df['hasFile'] = df.SDSS_ID.apply(lambda x: os.path.isfile(dataFolder+str(x)+'.npy'))
+        df['hasFile'] = df.SDSS_ID.apply(lambda x: os.path.isfile(dataFolder+str(x)+'.npy'))
 
-    df = df.drop(['logMst','err_l'], axis=1)
-    
-    df = df[df.logMstar != -99]
-    df = df[df.hasFile == True]
-    df = df[df['lin_err']!=0]
-    df = df[df.Distance < 600]
-    df = df[df.ML_g < 15]
+        df = df.drop(['logMst','err_l'], axis=1)
 
-    df = df[~df['SDSS_ID'].isin(['1237668349209149549','1237662224593846425','1237648705129283884','1237648703514804436'])] # remove 2 buggy galaxies
+        df = df[df.logMstar != -99]
+        df = df[df.hasFile == True]
+        df = df[df['lin_err']!=0]
+        df = df[df.Distance < 600]
+        df = df[df.ML_g < 15]
 
-    df['ML_g_rel_err'] = df['ML_g_rel_err'].apply(np.float64)
+        df = df[~df['SDSS_ID'].isin(['1237668349209149549','1237662224593846425','1237648705129283884','1237648703514804436'])] # remove 2 buggy galaxies
 
-    df = df[df['ML_g_rel_err'] != 0]
+        df['ML_g_rel_err'] = df['ML_g_rel_err'].apply(np.float64)
+
+        df = df[df['ML_g_rel_err'] != 0]
+        df['ML_g_abs_err'] = df['ML_g'] * df['ML_g_rel_err']
     
     return df
+
+def getAstrohackDataFrame():
+
+    if os.path.isfile('metadataFullF.csv'):
+        df = pd.read_csv('metadataFullF.csv')
+    else:
+        df =  pd.read_csv('metadata_full.csv', sep = '\t')
+
+        df['RA'] = df['RA'].apply(np.float64)
+        df['DEC'] = df['DEC'].apply(np.float64)
+        df['D25'] = df['D25'].apply(np.float64)
+        df['redshi'] = df['redshift'].apply(np.float64)
+        df['logMstar'] = df['logMstar'].apply(np.float64) #renamed
+        df['err_logMstar'] = df['err_logMstar'].apply(np.float64) #renamed
+        df['GalSize_kpc'] = df['GalSize_kpc'].apply(np.float64)
+        df['Distance'] = df['D_Mpc'].apply(np.float64) #renamed
+        df['d_pix_kpc'] = df['d_pix_kpc'].apply(np.float64)
+        df['ML_g'] = df['ML_g'].apply(np.float64)
+
+        df['lin_mass'] = np.power(10, df.logMstar)
+        df['lin_err'] = df['lin_mass'] * np.log(10) * df.err_logMstar
+
+        df['hasFile'] = df.SDSS_ID.apply(lambda x: os.path.isfile(dataFolder+str(x)+'.npy'))
+
+        # df = df.drop(['logMstar','err_logMstar'], axis=1)
+
+        df = df[df.logMstar != -99]
+        df = df[df.hasFile == True]
+        df = df[df['lin_err']!=0]
+        df = df[df.Distance < 600]
+        df = df[df.ML_g < 15]
+
+        df = df[~df['SDSS_ID'].isin(['1237668349209149549','1237662224593846425','1237648705129283884','1237648703514804436'])] # remove 2 buggy galaxies
+
+        df['ML_g_rel_err'] = df['ML_g_rel_err'].apply(np.float64)
+
+        df = df[df['ML_g_rel_err'] != 0]
+    
+    return df
+
 
 def lgb_chi2(Yp, train_data):
     Y = train_data.get_label()
@@ -307,7 +376,7 @@ def lgb_chi2(Yp, train_data):
 def getLGBMModelsWithCV(trainSet, YSet, errSet, errlinSet):
     kf = KFold(n_splits=nSplits,shuffle=True, random_state=220477)
 
-    cvtrainpreds = np.zeros([len(Xg3f),nSplits])
+    cvtrainpreds = np.zeros([len(trainSet),nSplits])
     models = []
     counter = 0
     for tix, vix in kf.split(trainSet):
@@ -317,8 +386,8 @@ def getLGBMModelsWithCV(trainSet, YSet, errSet, errlinSet):
         lgb_train = lgbm.Dataset(X_train, Y_train)
         lgb_eval = lgbm.Dataset(X_test, Y_test)
 
-        lgb_train.set_weight(1/train_err**2)
-        lgb_eval.set_weight(1/test_err**2)
+        lgb_train.set_weight(1/errSet[tix]**2)
+        lgb_eval.set_weight(1/errSet[vix]**2)
         
         gbm = lgbm.train(lgbm_params,
                        lgb_train,
@@ -336,6 +405,7 @@ def getLGBMModelsWithCV(trainSet, YSet, errSet, errlinSet):
         counter = counter+1
         
     return models, cvtrainpreds
+
 
 def getLGBMModelsNoCV(trainSet, YSet, errSet, errlinSet):
     cvtrainpreds = np.zeros([len(trainSet),1])
@@ -360,7 +430,6 @@ def getLGBMModelsNoCV(trainSet, YSet, errSet, errlinSet):
                        verbose_eval=100,
                        early_stopping_rounds=100,
                         feval = lgb_chi2
-                     
                     )
     models.append(gbm)
 
@@ -543,4 +612,29 @@ class PlotLosses(keras.callbacks.Callback):
         # ax.set_yscale("log", nonposy='clip')
         plt.legend()
         
-plot_losses = PlotLosses()
+basicLossPlot = PlotLosses()
+
+def xi2andPlot(pred, truth, error):
+    
+    resultXi2 = xi2(pred,truth, error)
+    
+    # cmap = sns.cubehelix_palette(as_cmap=True, dark=0, light=1, reverse=True)
+    cmap = sns.cubehelix_palette(as_cmap=True, start=2.8, rot=.1, reverse=True)
+    plt.figure(figsize=(20,8))
+    plt.subplot(131)
+    sns.kdeplot(pred, truth, alpha=1, cmap=cmap, shade=True, bw=0.2, cut=0, n_levels=60, label='chi² {:.2f}'.format(resultXi2) )
+    plt.scatter(x=pred, y=truth, alpha=0.04, c='w', marker='x', label='chi² {:.2f}'.format(resultXi2) )
+    plt.plot([min(truth),max(truth)],[min(truth),max(truth)], c='w', label='target')
+    plt.xlabel('prediction')
+    plt.ylabel('truth')
+    plt.legend()
+    plt.subplot(132)
+    sns.kdeplot(pred, pred-truth, alpha=1, cmap=cmap, shade=True, bw=0.2, cut=0, n_levels=60, label='LGB chi² {:.2f}'.format(resultXi2) )
+    plt.scatter(x=pred, y=pred-truth, alpha=0.04, c='w', marker='x', label='LGB chi² {:.2f}'.format(resultXi2) )
+    plt.plot([0.25,5],[0,0], c='w', label='target')
+    plt.xlabel('prediction')
+    plt.ylabel('prediction error')
+    plt.subplot(133)
+    plt.hist(pred-truth, bins=100)
+    plt.tight_layout()
+    plt.show()
