@@ -328,12 +328,12 @@ def getAstrohackDataFrameOld():
     
     return df
 
-def getAstrohackDataFrame():
+def getAstrohackDataFrameOld2(fileName='metadata_full.csv'):
 
-    if os.path.isfile('metadataFullF.csv'):
-        df = pd.read_csv('metadataFullF.csv')
+    if os.path.isfile('F'+fileName):
+        df = pd.read_csv('F'+fileName)
     else:
-        df =  pd.read_csv('metadata_full.csv', sep = '\t')
+        df =  pd.read_csv(fileName, sep = '\t')
 
         df['RA'] = df['RA'].apply(np.float64)
         df['DEC'] = df['DEC'].apply(np.float64)
@@ -618,7 +618,6 @@ def xi2andPlot(pred, truth, error):
     
     resultXi2 = xi2(pred,truth, error)
     
-    # cmap = sns.cubehelix_palette(as_cmap=True, dark=0, light=1, reverse=True)
     cmap = sns.cubehelix_palette(as_cmap=True, start=2.8, rot=.1, reverse=True)
     plt.figure(figsize=(20,8))
     plt.subplot(131)
