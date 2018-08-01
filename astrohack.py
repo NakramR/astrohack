@@ -222,6 +222,10 @@ def scale_image(A):
     A = (A - A.min()) / (A.max()-A.min())
     return A
 
+def scale_image255(A):
+    A = 255*((A - A.min()) / (A.max()-A.min()))
+    return A
+
 def normalize_image(A):
     A -= np.mean(A)
     A /= np.std(A)
@@ -239,13 +243,18 @@ def crop_image(Xg, percentage=0.75):
 PP_VFLIP = 1
 PP_HFLIP = 2
 PP_ROTATE = 4
-PP_SCALE = 8
+PP_SCALE01 = 8
 PP_LOG1P = 16
 PP_NORMALIZE = 32
 PP_CROP = 64
 PP_HACKATON = 128
+PP_SCALE255 = 256
+PP_LOG100P = 512
 PP_LOG = PP_LOG1P
 PP_RESCALE224 = 0
+PP_RESCALE299 = 1024
+PP_RESCALE69 = 2048
+PP_RESCALE128 = 4096
 
 def img_preprocnoread(Xg, preProcNum = 0, resize=True):
     if preProcNum & PP_HACKATON: #hackaton preproc
@@ -258,13 +267,32 @@ def img_preprocnoread(Xg, preProcNum = 0, resize=True):
         Xg = np.rot90(Xg)
     if preProcNum & PP_CROP: # crop
         Xg = crop_image(Xg)
-    if preProcNum & PP_SCALE: # scale [0,1]
-        Xg = scale_image(Xg)
+    if preProcNum & PP_SCALE01: # scale [0,1]
+        Xg = (Xg - Xg.min()) / (Xg.max()-Xg.min())
+    if preProcNum & PP_SCALE255: # scale [0,255]
+        Xg = 255*((Xg - Xg.min()) / (Xg.max()-Xg.min()))
     if preProcNum & PP_LOG1P: # log
         Xg = np.log1p(Xg - Xg.min())
+    if preProcNum & PP_LOG100P: # log
+        Xg = np.log1p(100*(Xg - Xg.min()))
     if preProcNum & PP_NORMALIZE: # normalize
         Xg = normalize_image(Xg)
-    
+    if preProcNum & PP_RESCALE299:
+        if Xg.shape[0] >= 299:
+            Xg = cv2.resize(Xg,(299,299), cv2.INTER_AREA)
+        else:
+            Xg = cv2.resize(Xg,(299,299), cv2.INTER_CUBIC)
+    if preProcNum & PP_RESCALE69:
+        if Xg.shape[0] >= 69:
+            Xg = cv2.resize(Xg,(69,69), cv2.INTER_AREA)
+        else:
+            Xg = cv2.resize(Xg,(69,69), cv2.INTER_CUBIC)
+    if preProcNum & PP_RESCALE128:
+        if Xg.shape[0] >= 69:
+            Xg = cv2.resize(Xg,(128,128), cv2.INTER_AREA)
+        else:
+            Xg = cv2.resize(Xg,(128,128), cv2.INTER_CUBIC)
+        
     if preProcNum == 0 or resize==True:
         if Xg.shape[0] >= 224:
             Xg = cv2.resize(Xg,(224,224), cv2.INTER_AREA)
@@ -275,13 +303,17 @@ def img_preprocnoread(Xg, preProcNum = 0, resize=True):
 def img_preproclist(x, preProcList):
     
     if (type(x) == int or type(x) == str or type(x)==np.int64 ):
-        Xg = read_image(x)
+        if (preProcList[0] == PP_HACKATON and os.path.isfile('data/hackaton_cleaned/'+str(x)+'.npy') ):
+            Xg = np.load('data/hackaton_cleaned/'+str(x)+'.npy')
+        else:
+            Xg = read_image(x)
     else:
         Xg = x
 
     for preProcNum in preProcList:
         Xg = img_preprocnoread(Xg, preProcNum, False)
     return Xg
+
     
     
 def img_preproc(id, preProcNum = 0):
